@@ -11,9 +11,22 @@ const app = express()
 const PORT = process.env.PORT || 3001
 const COOKIE = 'sk_token'
 const DAY = 86400000
+const FRONTEND_URL = process.env.FRONTEND_URL?.replace(/\/$/, '')
 
 app.set('trust proxy', 1) // correct IPs/HTTPS behind Nginx, Render, Railway, etc.
 app.use(helmet({ contentSecurityPolicy: false }))
+app.use((req, res, next) => {
+  const origin = req.headers.origin
+  if (FRONTEND_URL && origin === FRONTEND_URL) {
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Access-Control-Allow-Credentials', 'true')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS')
+    res.setHeader('Vary', 'Origin')
+  }
+  if (req.method === 'OPTIONS') return res.sendStatus(origin === FRONTEND_URL ? 204 : 403)
+  next()
+})
 app.use(express.json({ limit: '20kb' }))
 app.use(cookieParser())
 
@@ -47,7 +60,12 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
   if (!row.active) return fail(res, 403, 'This account is disabled. Please contact support.')
   db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(row.id)
   const token = jwt.sign({ sub: row.id }, JWT_SECRET, { expiresIn: '7d' })
-  res.cookie(COOKIE, token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 7 * DAY })
+  res.cookie(COOKIE, token, {
+    httpOnly: true,
+    sameSite: FRONTEND_URL ? 'none' : 'lax',
+    secure: process.env.NODE_ENV === 'production',
+    maxAge: 7 * DAY,
+  })
   res.json({ user: toPublic(row) })
 })
 
